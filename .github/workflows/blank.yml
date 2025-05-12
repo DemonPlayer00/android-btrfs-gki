@@ -23,16 +23,14 @@ jobs:
             lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip \
             fontconfig python3 bc cpio rsync kmod libelf-dev clang lld
 
-      # 关键修复：手动安装最新版 repo 工具
       - name: Install Latest Repo Tool
         run: |
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH  # 添加至 PATH
+          echo "$HOME/bin" >> $GITHUB_PATH
 
-      # 使用清华镜像源加速下载
-      - name: Clone Android Kernel (Android 12 5.10.136)
+      - name: Clone Android Kernel
         run: |
           mkdir android-kernel && cd android-kernel
           export REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/git/git-repo"
@@ -40,11 +38,15 @@ jobs:
             -b common-android12-5.10 --depth=1
           ~/bin/repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      # 切换到精确 commit（可选）
-      - name: Checkout Specific Commit
+      # 关键修改：先查询可用tag再checkout
+      - name: Find and Checkout Correct Tag
         run: |
           cd android-kernel/common
-          git checkout android12-5.10.136
+          git fetch --tags
+          echo "Available tags for Android 12 5.10.136:"
+          git tag -l "*5.10.136*" | sort -V
+          # 选择最接近的tag（这里以android12-5.10.136_r1为例）
+          git checkout android12-5.10.136_r1
 
       - name: Configure Kernel
         run: |
