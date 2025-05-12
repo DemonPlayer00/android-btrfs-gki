@@ -1,20 +1,21 @@
-name: Build Btrfs Module for Android GKI
+name: Build Btrfs for Android 12 (5.10.136)
 
 on:
   push:
-    branches: [ "main" ]  # 触发条件：main 分支 push 时运行
-  workflow_dispatch:      # 允许手动触发
+    branches: [ "main" ]
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # 使用最新 Ubuntu 环境
+    runs-on: ubuntu-22.04  # 推荐固定版本避免兼容问题
+    timeout-minutes: 60    # 防止长时间挂起
 
     steps:
-      # 1. 检出代码（如果仓库有自定义脚本）
+      # 1. 检出空仓库（仅占位）
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. 安装依赖（Android 内核编译所需工具）
+      # 2. 安装依赖（Android内核编译环境）
       - name: Install Dependencies
         run: |
           sudo apt-get update -y
@@ -22,32 +23,50 @@ jobs:
             zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
             libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev \
             lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip \
-            fontconfig python3 bc cpio rsync kmod libelf-dev clang lld
+            fontconfig python3 bc cpio rsync kmod libelf-dev clang lld \
+            git-lfs
 
-      # 3. 下载 Android 5.10 内核源码
-      - name: Clone Android Kernel
+      # 3. 下载 Android 12 的 5.10.136 内核源码
+      - name: Clone Android Kernel (android12-5.10)
         run: |
           mkdir android-kernel && cd android-kernel
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android-mainline
-          repo sync -j$(nproc) -c --no-tags
+          repo init -u https://android.googlesource.com/kernel/manifest \
+            -b android12-5.10 --depth=1
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      # 4. 配置内核（启用 Btrfs 模块）
+      # 4. 切换到指定 commit（确保版本严格匹配 5.10.136）
+      - name: Checkout Kernel 5.10.136
+        run: |
+          cd android-kernel/common
+          git fetch --tags
+          git checkout android12-5.10.136  # 精确版本
+
+      # 5. 配置内核（启用Btrfs模块）
       - name: Configure Kernel
         run: |
           cd android-kernel/common
           make ARCH=arm64 gki_defconfig
-          ./scripts/config --module CONFIG_BTRFS_FS  # 启用 Btrfs 模块
+          ./scripts/config --module CONFIG_BTRFS_FS  # 启用模块
+          ./scripts/config --disable MODULE_SIG      # 关闭签名验证（测试用）
           make ARCH=arm64 olddefconfig
 
-      # 5. 编译 Btrfs 模块
+      # 6. 编译 Btrfs 模块
       - name: Build Btrfs Module
         run: |
           cd android-kernel/common
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) fs/btrfs/btrfs.ko
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            -j$(nproc) fs/btrfs/btrfs.ko
 
-      # 6. 上传编译好的模块（可在 Actions 页面下载）
+      # 7. 检查模块版本信息（关键！）
+      - name: Verify Module Version
+        run: |
+          cd android-kernel/common
+          modinfo fs/btrfs/btrfs.ko | grep vermagic
+          echo "确保输出版本与目标设备一致！"
+
+      # 8. 上传编译好的模块
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: btrfs.ko
+          name: btrfs.ko-android12-5.10.136
           path: android-kernel/common/fs/btrfs/btrfs.ko
