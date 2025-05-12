@@ -11,11 +11,9 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # 1. 检出仓库（必须步骤，即使仓库为空）
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. 安装依赖
       - name: Install Dependencies
         run: |
           sudo apt-get update -y
@@ -23,37 +21,45 @@ jobs:
             zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
             libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev \
             lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip \
-            fontconfig python3 bc cpio rsync kmod libelf-dev clang lld \
-            git-lfs repo
+            fontconfig python3 bc cpio rsync kmod libelf-dev clang lld
 
-      # 3. 下载 Android 12 内核源码 (5.10.136)
-      - name: Clone Android Kernel
+      # 关键修复：手动安装最新版 repo 工具
+      - name: Install Latest Repo Tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH  # 添加至 PATH
+
+      # 使用清华镜像源加速下载
+      - name: Clone Android Kernel (Android 12 5.10.136)
         run: |
           mkdir android-kernel && cd android-kernel
-          repo init -u https://android.googlesource.com/kernel/manifest \
-            -b android12-5.10 --depth=1
-          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
-          cd common
+          export REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/git/git-repo"
+          ~/bin/repo init -u https://aosp.tuna.tsinghua.edu.cn/kernel/manifest \
+            -b common-android12-5.10 --depth=1
+          ~/bin/repo sync -c -j$(nproc) --no-tags --no-clone-bundle
+
+      # 切换到精确 commit（可选）
+      - name: Checkout Specific Commit
+        run: |
+          cd android-kernel/common
           git checkout android12-5.10.136
 
-      # 4. 配置内核（启用Btrfs模块）
       - name: Configure Kernel
         run: |
           cd android-kernel/common
           make ARCH=arm64 gki_defconfig
           ./scripts/config --module CONFIG_BTRFS_FS
-          ./scripts/config --disable MODULE_SIG  # 测试用，关闭签名验证
+          ./scripts/config --disable MODULE_SIG
           make ARCH=arm64 olddefconfig
 
-      # 5. 编译 Btrfs 模块
       - name: Build Btrfs Module
         run: |
           cd android-kernel/common
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            -j$(nproc) fs/btrfs/btrfs.ko
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) fs/btrfs/btrfs.ko
 
-      # 6. 上传编译好的模块（使用官方推荐写法）
-      - name: Upload Btrfs Module
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: btrfs.ko-android12-5.10.136
