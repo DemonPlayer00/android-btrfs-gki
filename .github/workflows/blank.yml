@@ -46,7 +46,7 @@ jobs:
           echo "Available tags for Android 12 5.10.136:"
           git tag -l "*5.10.136*" | sort -V
           # 选择最接近的tag（这里以android12-5.10.136_r1为例）
-          git checkout android12-5.10.136_r1
+          git checkout android12-5.10.168_r00
 
       - name: Configure Kernel
         run: |
