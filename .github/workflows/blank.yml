@@ -29,8 +29,8 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y libncurses6:i386
-          # 安装Ubuntu仓库中的Clang
-          sudo apt-get install -y clang lld
+          # 安装Ubuntu仓库中的Clang和ARM64交叉编译工具链
+          sudo apt-get install -y clang lld gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Download Android kernel source
         run: |
@@ -47,6 +47,8 @@ jobs:
           echo "CCACHE_MAXSIZE=50G" >> $GITHUB_ENV
           # 使用Ubuntu仓库中的Clang
           echo "CLANG_PATH=$(which clang)" >> $GITHUB_ENV
+          # 设置交叉编译工具链路径
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
       - name: Configure ccache
         run: |
@@ -57,13 +59,13 @@ jobs:
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
-          make O=out ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE gki_defconfig
 
       - name: Build BTRFS module
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
-          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- CC=clang M=fs/btrfs modules
+          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang M=fs/btrfs modules
 
       - name: Collect build artifacts
         run: |
