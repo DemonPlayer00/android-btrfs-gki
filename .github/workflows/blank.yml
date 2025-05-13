@@ -87,11 +87,21 @@ jobs:
           # 验证配置
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang olddefconfig
 
+      - name: Save kernel configuration
+        run: |
+          mkdir -p config_backup
+          cp kernel_source/common/out/.config config_backup/
+
       - name: Clean previous build
         run: |
           cd kernel_source/common
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang clean
           rm -rf out
+
+      - name: Restore kernel configuration
+        run: |
+          mkdir -p kernel_source/common/out
+          cp config_backup/.config kernel_source/common/out/
 
       - name: Build complete kernel with modules
         run: |
