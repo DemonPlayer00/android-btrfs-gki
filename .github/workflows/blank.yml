@@ -50,6 +50,20 @@ jobs:
           # git fetch --tags
           git checkout android12-5.10.168_r00
 
+      - name: Configure Kernel
+        run: |
+          cd android-kernel/common
+          # 确保配置目录存在
+          mkdir -p out
+          # 生成默认配置
+          make ARCH=arm64 O=out gki_defconfig
+          # 启用Btrfs模块
+          ./scripts/config --file out/.config --module CONFIG_BTRFS_FS
+          # 关闭模块签名验证（仅测试用）
+          ./scripts/config --file out/.config --disable MODULE_SIG
+          # 生成最终配置
+          make ARCH=arm64 O=out olddefconfig
+
       # 关键修改：明确指定工具链路径
       - name: Build Btrfs Module
         run: |
