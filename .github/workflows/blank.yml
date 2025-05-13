@@ -1,103 +1,70 @@
-name: Build Btrfs for Android 12 (5.10.168_r00)
+name: Build BTRFS Kernel Module for GKI
 
 on:
-  push:
-    tags: [ "android12-5.10.168_r00" ]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Kernel tag to build (default: android12-5.10.168_r00)'
-        required: false
-        default: 'android12-5.10.168_r00'
+  push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Set up environment
         run: |
           sudo apt-get update -y
-          
-          # Remove conflicting packages
-          sudo apt-get remove -y gcc-multilib g++-multilib || true
-          
-          # Install basic tools
           sudo apt-get install -y \
-            git-core gnupg flex bison build-essential \
-            zip curl zlib1g-dev libc6-dev-i386 \
-            libncurses5 lib32ncurses5-dev \
-            x11proto-core-dev libx11-dev lib32z1-dev \
-            libgl1-mesa-dev libxml2-utils xsltproc unzip \
-            fontconfig python3 bc cpio rsync kmod \
-            libelf-dev clang lld git-lfs
-          
-          # Install ARM64 toolchain
-          sudo apt-get install -y \
-            gcc-11-aarch64-linux-gnu \
-            g++-11-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
-            libc6-dev-arm64-cross
-          
-          # Create symlinks
-          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-11 /usr/bin/aarch64-linux-gnu-gcc
-          sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-11 /usr/bin/aarch64-linux-gnu-g++
-          
-          # Verify
-          aarch64-linux-gnu-gcc --version
-          aarch64-linux-gnu-g++ --version
-          which aarch64-linux-gnu-ld
+            build-essential \
+            flex \
+            bison \
+            libssl-dev \
+            libncurses5-dev \
+            bc \
+            rsync \
+            cpio \
+            python3 \
+            kmod \
+            libelf-dev \
+            git
 
-      - name: Setup Repo Tool
+      - name: Download kernel source
         run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
+          git clone --depth=1 --branch android12-5.10.168_r00 \
+            https://android.googlesource.com/kernel/common \
+            $GITHUB_WORKSPACE/kernel
 
-      - name: Clone Android Kernel with Tag
+      - name: Configure kernel
+        working-directory: $GITHUB_WORKSPACE/kernel
         run: |
-          mkdir android-kernel && cd android-kernel
-          export REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/git/git-repo"
-          
-          # Use the input tag if provided via workflow_dispatch, otherwise use default
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG="android12-5.10.168_r00"
-          fi
-          
-          ~/bin/repo init -u https://aosp.tuna.tsinghua.edu.cn/kernel/manifest \
-            -b $TAG --depth=1
-          ~/bin/repo sync -c -j$(nproc) --no-tags --no-clone-bundle
+          make ARCH=arm64 O=$GITHUB_WORKSPACE/build android_defconfig
+          # 启用BTRFS支持（如果未启用）
+          scripts/config --file $GITHUB_WORKSPACE/build/.config \
+            --set-str CONFIG_BTRFS_FS y
+          scripts/config --file $GITHUB_WORKSPACE/build/.config \
+            --set-str CONFIG_BTRFS_FS_POSIX_ACL y
+          scripts/config --file $GITHUB_WORKSPACE/build/.config \
+            --set-str CONFIG_BTRFS_FS_SECURITY y
+          make ARCH=arm64 O=$GITHUB_WORKSPACE/build olddefconfig
 
-      - name: Configure and Build
+      - name: Build BTRFS module
+        working-directory: $GITHUB_WORKSPACE/kernel
         run: |
-          cd android-kernel/common
-          mkdir -p out
-          
-          # Configure kernel
-          make ARCH=arm64 O=out gki_defconfig
-          ./scripts/config --file out/.config --module CONFIG_BTRFS_FS
-          ./scripts/config --file out/.config --disable MODULE_SIG
-          make ARCH=arm64 O=out olddefconfig
-          
-          # Build module
-          make ARCH=arm64 O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=aarch64-linux-gnu-gcc \
-            LD=aarch64-linux-gnu-ld \
-            -j$(nproc) fs/btrfs/btrfs.ko
-          
-          # Verify
-          modinfo out/fs/btrfs/btrfs.ko | grep vermagic
+          make -j$(nproc) ARCH=arm64 O=$GITHUB_WORKSPACE/build M=fs/btrfs modules
 
-      - name: Upload Artifact
+      - name: Collect artifacts
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/artifacts/modules
+          find $GITHUB_WORKSPACE/build/fs/btrfs -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/artifacts/modules/ \;
+          find $GITHUB_WORKSPACE/build -name "Module.symvers" -exec cp {} $GITHUB_WORKSPACE/artifacts/ \;
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: btrfs.ko-${{ github.event.inputs.tag || 'android12-5.10.168_r00' }}
-          path: android-kernel/common/out/fs/btrfs/btrfs.ko
+          name: btrfs-modules
+          path: $GITHUB_WORKSPACE/artifacts/
+          retention-days: 7    
