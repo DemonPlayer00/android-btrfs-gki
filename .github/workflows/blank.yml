@@ -28,8 +28,9 @@ jobs:
           # 安装适用于Ubuntu 24.04的32位库支持
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          # 使用libncurses6:i386替代libncurses5:i386
           sudo apt-get install -y libncurses6:i386
+          # 安装Ubuntu仓库中的Clang
+          sudo apt-get install -y clang lld
 
       - name: Download Android kernel source
         run: |
@@ -44,28 +45,24 @@ jobs:
           echo "SUBARCH=arm64" >> $GITHUB_ENV
           echo "CCACHE_DIR=$(pwd)/.ccache" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=50G" >> $GITHUB_ENV
+          # 使用Ubuntu仓库中的Clang
+          echo "CLANG_PATH=$(which clang)" >> $GITHUB_ENV
 
       - name: Configure ccache
         run: |
           ccache -M $CCACHE_MAXSIZE
           ccache -z
 
-      - name: Download Clang toolchain
-        run: |
-          mkdir -p toolchain
-          cd toolchain
-          curl -L https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r416183b.tar.gz | tar xz
-
       - name: Configure kernel
         run: |
           cd kernel_source/common
-          export PATH=$(pwd)/../../toolchain/bin:$PATH
+          export PATH=$(dirname $CLANG_PATH):$PATH
           make O=out ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
 
       - name: Build BTRFS module
         run: |
           cd kernel_source/common
-          export PATH=$(pwd)/../../toolchain/bin:$PATH
+          export PATH=$(dirname $CLANG_PATH):$PATH
           make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- CC=clang M=fs/btrfs modules
 
       - name: Collect build artifacts
