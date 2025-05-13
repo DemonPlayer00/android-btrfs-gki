@@ -47,13 +47,8 @@ jobs:
       - name: Find and Checkout Correct Tag
         run: |
           cd android-kernel/common
-          git fetch --tags
-          SELECTED_TAG=$(git tag -l "*5.10.136*" | head -1)
-          if [ -z "$SELECTED_TAG" ]; then
-            git checkout common-android12-5.10
-          else
-            git checkout "$SELECTED_TAG"
-          fi
+          # git fetch --tags
+          git checkout android12-5.10.168_r00
 
       # 关键修改：明确指定工具链路径
       - name: Build Btrfs Module
