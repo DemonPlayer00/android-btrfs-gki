@@ -2,8 +2,13 @@ name: Build Btrfs for Android 12 (5.10.168_r00)
 
 on:
   push:
-    branches: [ "main" ]
+    tags: [ "android12-5.10.168_r00" ]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Kernel tag to build (default: android12-5.10.168_r00)'
+        required: false
+        default: 'android12-5.10.168_r00'
 
 jobs:
   build:
@@ -54,12 +59,20 @@ jobs:
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Clone Android Kernel
+      - name: Clone Android Kernel with Tag
         run: |
           mkdir android-kernel && cd android-kernel
           export REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/git/git-repo"
+          
+          # Use the input tag if provided via workflow_dispatch, otherwise use default
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="android12-5.10.168_r00"
+          fi
+          
           ~/bin/repo init -u https://aosp.tuna.tsinghua.edu.cn/kernel/manifest \
-            -b android12-5.10.168_r00 --depth=1
+            -b $TAG --depth=1
           ~/bin/repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
       - name: Configure and Build
@@ -86,5 +99,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: btrfs.ko-android12-5.10.168_r00
+          name: btrfs.ko-${{ github.event.inputs.tag || 'android12-5.10.168_r00' }}
           path: android-kernel/common/out/fs/btrfs/btrfs.ko
