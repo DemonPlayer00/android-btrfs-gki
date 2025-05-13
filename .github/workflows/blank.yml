@@ -18,10 +18,10 @@ jobs:
         run: |
           sudo apt-get update -y
           
-          # 移除冲突包
+          # Remove conflicting packages
           sudo apt-get remove -y gcc-multilib g++-multilib || true
           
-          # 安装基础工具
+          # Install basic tools
           sudo apt-get install -y \
             git-core gnupg flex bison build-essential \
             zip curl zlib1g-dev libc6-dev-i386 \
@@ -31,18 +31,18 @@ jobs:
             fontconfig python3 bc cpio rsync kmod \
             libelf-dev clang lld git-lfs
           
-          # 安装ARM64工具链
+          # Install ARM64 toolchain
           sudo apt-get install -y \
             gcc-11-aarch64-linux-gnu \
             g++-11-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
             libc6-dev-arm64-cross
           
-          # 创建符号链接
+          # Create symlinks
           sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-11 /usr/bin/aarch64-linux-gnu-gcc
           sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-11 /usr/bin/aarch64-linux-gnu-g++
           
-          # 验证
+          # Verify
           aarch64-linux-gnu-gcc --version
           aarch64-linux-gnu-g++ --version
           which aarch64-linux-gnu-ld
@@ -67,20 +67,20 @@ jobs:
           cd android-kernel/common
           mkdir -p out
           
-          # 配置内核
+          # Configure kernel
           make ARCH=arm64 O=out gki_defconfig
           ./scripts/config --file out/.config --module CONFIG_BTRFS_FS
           ./scripts/config --file out/.config --disable MODULE_SIG
           make ARCH=arm64 O=out olddefconfig
           
-          # 编译模块
+          # Build module
           make ARCH=arm64 O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=aarch64-linux-gnu-gcc \
             LD=aarch64-linux-gnu-ld \
             -j$(nproc) fs/btrfs/btrfs.ko
           
-          # 验证
+          # Verify
           modinfo out/fs/btrfs/btrfs.ko | grep vermagic
 
       - name: Upload Artifact
