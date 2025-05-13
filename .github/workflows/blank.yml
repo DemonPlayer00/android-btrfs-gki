@@ -71,6 +71,19 @@ jobs:
           echo "CONFIG_BTRFS_FS_POSIX_ACL=y" >> out/.config
           echo "CONFIG_BTRFS_FS_SECURITY=y" >> out/.config
           
+          # 启用可能与符号相关的VFS配置选项
+          echo "CONFIG_VFS_CACHE_PARTIAL_WRITE=y" >> out/.config
+          echo "CONFIG_VFS_DIO=y" >> out/.config
+          echo "CONFIG_VFS_WRITEBACK=y" >> out/.config
+          echo "CONFIG_VFS_READDIR=y" >> out/.config
+          echo "CONFIG_VFS_WRITE=y" >> out/.config
+          echo "CONFIG_VFS_LOCK=y" >> out/.config
+          echo "CONFIG_VFS_FILESYSTEM=y" >> out/.config
+          echo "CONFIG_VFS_FSNOTIFY=y" >> out/.config
+          echo "CONFIG_VFS_SPLICE=y" >> out/.config
+          echo "CONFIG_VFS_DENTRY_ALIAS=y" >> out/.config
+          echo "CONFIG_VFS_CACHE_WRITEBACK=y" >> out/.config
+          
           # 验证配置
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang olddefconfig
 
@@ -125,4 +138,4 @@ jobs:
           retention-days: 7
 
       - name: Show ccache stats
-        run: ccache -s    
+        run: ccache -s
