@@ -36,35 +36,36 @@ jobs:
         run: |
           git clone --depth=1 --branch android12-5.10.168_r00 \
             https://android.googlesource.com/kernel/common \
-            $GITHUB_WORKSPACE/kernel
+            "$GITHUB_WORKSPACE/kernel"
 
       - name: Configure kernel
-        working-directory: $GITHUB_WORKSPACE/kernel
+        working-directory: "$GITHUB_WORKSPACE/kernel"
         run: |
-          make ARCH=arm64 O=$GITHUB_WORKSPACE/build android_defconfig
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          make ARCH=arm64 O="$GITHUB_WORKSPACE/build" android_defconfig
           # 启用BTRFS支持（如果未启用）
-          scripts/config --file $GITHUB_WORKSPACE/build/.config \
+          scripts/config --file "$GITHUB_WORKSPACE/build/.config" \
             --set-str CONFIG_BTRFS_FS y
-          scripts/config --file $GITHUB_WORKSPACE/build/.config \
+          scripts/config --file "$GITHUB_WORKSPACE/build/.config" \
             --set-str CONFIG_BTRFS_FS_POSIX_ACL y
-          scripts/config --file $GITHUB_WORKSPACE/build/.config \
+          scripts/config --file "$GITHUB_WORKSPACE/build/.config" \
             --set-str CONFIG_BTRFS_FS_SECURITY y
-          make ARCH=arm64 O=$GITHUB_WORKSPACE/build olddefconfig
+          make ARCH=arm64 O="$GITHUB_WORKSPACE/build" olddefconfig
 
       - name: Build BTRFS module
-        working-directory: $GITHUB_WORKSPACE/kernel
+        working-directory: "$GITHUB_WORKSPACE/kernel"
         run: |
-          make -j$(nproc) ARCH=arm64 O=$GITHUB_WORKSPACE/build M=fs/btrfs modules
+          make -j$(nproc) ARCH=arm64 O="$GITHUB_WORKSPACE/build" M=fs/btrfs modules
 
       - name: Collect artifacts
         run: |
-          mkdir -p $GITHUB_WORKSPACE/artifacts/modules
-          find $GITHUB_WORKSPACE/build/fs/btrfs -name "*.ko" -exec cp {} $GITHUB_WORKSPACE/artifacts/modules/ \;
-          find $GITHUB_WORKSPACE/build -name "Module.symvers" -exec cp {} $GITHUB_WORKSPACE/artifacts/ \;
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/modules"
+          find "$GITHUB_WORKSPACE/build/fs/btrfs" -name "*.ko" -exec cp {} "$GITHUB_WORKSPACE/artifacts/modules/" \;
+          find "$GITHUB_WORKSPACE/build" -name "Module.symvers" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \;
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: btrfs-modules
-          path: $GITHUB_WORKSPACE/artifacts/
+          path: "$GITHUB_WORKSPACE/artifacts/"
           retention-days: 7    
