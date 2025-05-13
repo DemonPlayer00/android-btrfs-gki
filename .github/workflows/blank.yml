@@ -1,4 +1,4 @@
-name: Build Btrfs for Android 12 (5.10.136)
+name: Build Btrfs for Android 12 (5.10.168_r00)
 
 on:
   push:
@@ -8,73 +8,102 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 关键修改：安装完整的交叉编译工具链
-      - name: Install Toolchains
+      - name: Install Dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
-            build-essential \
-            gcc-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
-            libncurses-dev \
-            flex bison libelf-dev
+            git-core gnupg flex bison build-essential \
+            zip curl zlib1g-dev gcc-multilib g++-multilib \
+            libc6-dev-i386 libncurses5 lib32ncurses5-dev \
+            x11proto-core-dev libx11-dev lib32z1-dev \
+            libgl1-mesa-dev libxml2-utils xsltproc unzip \
+            fontconfig python3 bc cpio rsync kmod \
+            libelf-dev clang lld git-lfs \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-          # 验证工具链安装
           aarch64-linux-gnu-gcc --version
           which aarch64-linux-gnu-ld
 
-      - name: Install Latest Repo Tool
+      - name: Setup Repo Tool
         run: |
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Clone Android Kernel
+      - name: Clone Android Kernel (android12-5.10.168_r00)
         run: |
           mkdir android-kernel && cd android-kernel
           export REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/git/git-repo"
           ~/bin/repo init -u https://aosp.tuna.tsinghua.edu.cn/kernel/manifest \
-            -b common-android12-5.10 --depth=1
+            -b android12-5.10.168_r00 --depth=1
           ~/bin/repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      - name: Find and Checkout Correct Tag
+      - name: Verify Kernel Version
         run: |
           cd android-kernel/common
-          # git fetch --tags
-          git checkout android12-5.10.168_r00
+          echo "Kernel version:"
+          grep -E "VERSION|PATCHLEVEL|SUBLEVEL" Makefile
+          [ "$(grep 'SUBLEVEL = 168' Makefile)" ] || exit 1
 
       - name: Configure Kernel
         run: |
           cd android-kernel/common
-          # 确保配置目录存在
           mkdir -p out
-          # 生成默认配置
+          
           make ARCH=arm64 O=out gki_defconfig
+          
           # 启用Btrfs模块
           ./scripts/config --file out/.config --module CONFIG_BTRFS_FS
-          # 关闭模块签名验证（仅测试用）
+          # 关闭签名验证（测试用）
           ./scripts/config --file out/.config --disable MODULE_SIG
-          # 生成最终配置
+          # 解决可能的依赖问题
+          ./scripts/config --file out/.config --enable BLK_DEV_INTEGRITY
+          ./scripts/config --file out/.config --enable LIBCRC32C
+          
           make ARCH=arm64 O=out olddefconfig
+          
+          # 最终验证
+          grep CONFIG_BTRFS_FS= out/.config || exit 1
 
-      # 关键修改：明确指定工具链路径
       - name: Build Btrfs Module
         run: |
           cd android-kernel/common
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          make ARCH=arm64 O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- \
             CC=aarch64-linux-gnu-gcc \
             LD=aarch64-linux-gnu-ld \
             -j$(nproc) fs/btrfs/btrfs.ko
+          
+          # 检查模块信息
+          modinfo out/fs/btrfs/btrfs.ko | grep -E "vermagic|version"
+          file out/fs/btrfs/btrfs.ko
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: btrfs.ko-android12-5.10.136
-          path: android-kernel/common/fs/btrfs/btrfs.ko
+          name: btrfs.ko-android12-5.10.168_r00
+          path: android-kernel/common/out/fs/btrfs/btrfs.ko
+          retention-days: 7
+
+      - name: Generate Module Info
+        run: |
+          cd android-kernel/common
+          echo "=== Module Details ===" > module_info.txt
+          modinfo out/fs/btrfs/btrfs.ko >> module_info.txt
+          echo -e "\n=== Build Environment ===" >> module_info.txt
+          aarch64-linux-gnu-gcc --version >> module_info.txt
+          echo "Kernel version:" >> module_info.txt
+          grep -E "VERSION|PATCHLEVEL|SUBLEVEL" Makefile >> module_info.txt
+          
+          # 上传构建信息
+          actions/upload-artifact@v4
+            with:
+              name: build-info
+              path: module_info.txt
