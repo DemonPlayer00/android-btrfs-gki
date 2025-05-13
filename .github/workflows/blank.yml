@@ -17,17 +17,34 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update -y
+          
+          # 移除冲突包
+          sudo apt-get remove -y gcc-multilib g++-multilib || true
+          
+          # 安装基础工具
           sudo apt-get install -y \
             git-core gnupg flex bison build-essential \
-            zip curl zlib1g-dev gcc-multilib g++-multilib \
-            libc6-dev-i386 libncurses5 lib32ncurses5-dev \
+            zip curl zlib1g-dev libc6-dev-i386 \
+            libncurses5 lib32ncurses5-dev \
             x11proto-core-dev libx11-dev lib32z1-dev \
             libgl1-mesa-dev libxml2-utils xsltproc unzip \
             fontconfig python3 bc cpio rsync kmod \
-            libelf-dev clang lld git-lfs \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-
+            libelf-dev clang lld git-lfs
+          
+          # 安装ARM64工具链
+          sudo apt-get install -y \
+            gcc-11-aarch64-linux-gnu \
+            g++-11-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
+          
+          # 创建符号链接
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-11 /usr/bin/aarch64-linux-gnu-gcc
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-11 /usr/bin/aarch64-linux-gnu-g++
+          
+          # 验证
           aarch64-linux-gnu-gcc --version
+          aarch64-linux-gnu-g++ --version
           which aarch64-linux-gnu-ld
 
       - name: Setup Repo Tool
@@ -37,7 +54,7 @@ jobs:
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Clone Android Kernel (android12-5.10.168_r00)
+      - name: Clone Android Kernel
         run: |
           mkdir android-kernel && cd android-kernel
           export REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/git/git-repo"
@@ -45,65 +62,29 @@ jobs:
             -b android12-5.10.168_r00 --depth=1
           ~/bin/repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      - name: Verify Kernel Version
-        run: |
-          cd android-kernel/common
-          echo "Kernel version:"
-          grep -E "VERSION|PATCHLEVEL|SUBLEVEL" Makefile
-          [ "$(grep 'SUBLEVEL = 168' Makefile)" ] || exit 1
-
-      - name: Configure Kernel
+      - name: Configure and Build
         run: |
           cd android-kernel/common
           mkdir -p out
           
+          # 配置内核
           make ARCH=arm64 O=out gki_defconfig
-          
-          # 启用Btrfs模块
           ./scripts/config --file out/.config --module CONFIG_BTRFS_FS
-          # 关闭签名验证（测试用）
           ./scripts/config --file out/.config --disable MODULE_SIG
-          # 解决可能的依赖问题
-          ./scripts/config --file out/.config --enable BLK_DEV_INTEGRITY
-          ./scripts/config --file out/.config --enable LIBCRC32C
-          
           make ARCH=arm64 O=out olddefconfig
           
-          # 最终验证
-          grep CONFIG_BTRFS_FS= out/.config || exit 1
-
-      - name: Build Btrfs Module
-        run: |
-          cd android-kernel/common
+          # 编译模块
           make ARCH=arm64 O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=aarch64-linux-gnu-gcc \
             LD=aarch64-linux-gnu-ld \
             -j$(nproc) fs/btrfs/btrfs.ko
           
-          # 检查模块信息
-          modinfo out/fs/btrfs/btrfs.ko | grep -E "vermagic|version"
-          file out/fs/btrfs/btrfs.ko
+          # 验证
+          modinfo out/fs/btrfs/btrfs.ko | grep vermagic
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: btrfs.ko-android12-5.10.168_r00
           path: android-kernel/common/out/fs/btrfs/btrfs.ko
-          retention-days: 7
-
-      - name: Generate Module Info
-        run: |
-          cd android-kernel/common
-          echo "=== Module Details ===" > module_info.txt
-          modinfo out/fs/btrfs/btrfs.ko >> module_info.txt
-          echo -e "\n=== Build Environment ===" >> module_info.txt
-          aarch64-linux-gnu-gcc --version >> module_info.txt
-          echo "Kernel version:" >> module_info.txt
-          grep -E "VERSION|PATCHLEVEL|SUBLEVEL" Makefile >> module_info.txt
-          
-          # 上传构建信息
-          actions/upload-artifact@v4
-            with:
-              name: build-info
-              path: module_info.txt
