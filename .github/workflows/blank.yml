@@ -65,6 +65,14 @@ jobs:
           # 生成必要的头文件和脚本
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang prepare
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang scripts
+          
+          # 确保BTRFS模块在配置中是启用的
+          echo "CONFIG_BTRFS_FS=m" >> out/.config
+          echo "CONFIG_BTRFS_FS_POSIX_ACL=y" >> out/.config
+          echo "CONFIG_BTRFS_FS_SECURITY=y" >> out/.config
+          
+          # 验证配置
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang olddefconfig
 
       - name: Build minimal kernel for module dependencies
         run: |
@@ -87,6 +95,17 @@ jobs:
           make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
             M=fs/btrfs \
             modules
+
+      - name: Verify BTRFS module exists
+        run: |
+          if [ ! -f "kernel_source/common/out/fs/btrfs/btrfs.ko" ]; then
+            echo "BTRFS module not found!"
+            echo "Listing contents of out/fs/btrfs directory:"
+            ls -la kernel_source/common/out/fs/btrfs || true
+            echo "Listing contents of out directory:"
+            ls -la kernel_source/common/out || true
+            exit 1
+          fi
 
       - name: Collect build artifacts
         run: |
