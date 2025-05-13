@@ -62,24 +62,38 @@ jobs:
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE gki_defconfig
-          # 生成必要的头文件
+          # 生成必要的头文件和脚本
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang prepare
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang scripts
+
+      - name: Build minimal kernel for module dependencies
+        run: |
+          cd kernel_source/common
+          export PATH=$(dirname $CLANG_PATH):$PATH
+          # 编译基础内核组件，生成必要的符号文件
+          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
+            KBUILD_MODULES=1 \
+            modules_prepare
+          # 编译核心内核部分，但不生成完整的内核镜像
+          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
+            KBUILD_MODULES=1 \
+            kernel/ certs/ mm/ fs/ ipc/ security/ crypto/ block/
 
       - name: Build BTRFS module
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
-          # 确保modpost工具可用
-          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang modules_prepare
-          # 编译BTRFS模块
-          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang M=fs/btrfs modules
+          # 编译BTRFS模块，使用之前生成的内核符号
+          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
+            M=fs/btrfs \
+            modules
 
       - name: Collect build artifacts
         run: |
           mkdir -p artifacts
           cp kernel_source/common/out/fs/btrfs/btrfs.ko artifacts/
           cp kernel_source/common/out/.config artifacts/config
+          cp kernel_source/common/out/Module.symvers artifacts/  # 保存符号表
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
