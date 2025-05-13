@@ -74,24 +74,29 @@ jobs:
           # 验证配置
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang olddefconfig
 
-      - name: Build minimal kernel for module dependencies
+      - name: Build complete kernel with modules
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
-          # 编译基础内核组件，生成必要的符号文件
+          # 编译完整内核和所有模块，确保生成Module.symvers
           make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
             KBUILD_MODULES=1 \
-            modules_prepare
-          # 编译核心内核部分，但不生成完整的内核镜像
-          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
-            KBUILD_MODULES=1 \
-            kernel/ certs/ mm/ fs/ ipc/ security/ crypto/ block/
+            all
+
+      - name: Verify Module.symvers exists
+        run: |
+          if [ ! -f "kernel_source/common/out/Module.symvers" ]; then
+            echo "Module.symvers not found!"
+            echo "Listing contents of out directory:"
+            ls -la kernel_source/common/out || true
+            exit 1
+          fi
 
       - name: Build BTRFS module
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
-          # 编译BTRFS模块，使用之前生成的内核符号
+          # 重新编译BTRFS模块，确保使用最新的配置
           make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
             M=fs/btrfs \
             modules
@@ -102,8 +107,6 @@ jobs:
             echo "BTRFS module not found!"
             echo "Listing contents of out/fs/btrfs directory:"
             ls -la kernel_source/common/out/fs/btrfs || true
-            echo "Listing contents of out directory:"
-            ls -la kernel_source/common/out || true
             exit 1
           fi
 
