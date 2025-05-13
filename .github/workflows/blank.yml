@@ -31,6 +31,8 @@ jobs:
           sudo apt-get install -y libncurses6:i386
           # 安装Ubuntu仓库中的Clang和ARM64交叉编译工具链
           sudo apt-get install -y clang lld gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          # 安装libssl-dev以确保modpost工具能正常工作
+          sudo apt-get install -y libssl-dev
 
       - name: Download Android kernel source
         run: |
@@ -60,11 +62,17 @@ jobs:
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE gki_defconfig
+          # 生成必要的头文件
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang prepare
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang scripts
 
       - name: Build BTRFS module
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
+          # 确保modpost工具可用
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang modules_prepare
+          # 编译BTRFS模块
           make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang M=fs/btrfs modules
 
       - name: Collect build artifacts
