@@ -1,71 +1,80 @@
-name: Build BTRFS Kernel Module for GKI
+name: Build BTRFS Module for GKI
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+    inputs:
+      kernel_tag:
+        description: 'Kernel tag to build (default: android12-5.10.168_r00)'
+        required: false
+        default: 'android12-5.10.168_r00'
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up environment
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            build-essential \
-            flex \
-            bison \
-            libssl-dev \
-            libncurses5-dev \
-            bc \
-            rsync \
-            cpio \
-            python3 \
-            kmod \
-            libelf-dev \
-            git
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
 
-      - name: Download kernel source
+      - name: Install dependencies
         run: |
-          git clone --depth=1 --branch android12-5.10.168_r00 \
-            https://android.googlesource.com/kernel/common \
-            "$GITHUB_WORKSPACE/kernel"
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+
+      - name: Download Android kernel source
+        run: |
+          KERNEL_TAG=${{ github.event.inputs.kernel_tag || 'android12-5.10.168_r00' }}
+          mkdir -p kernel_source
+          cd kernel_source
+          git clone https://android.googlesource.com/kernel/common -b $KERNEL_TAG --depth 1
+
+      - name: Set up environment variables
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$(pwd)/.ccache" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=50G" >> $GITHUB_ENV
+
+      - name: Configure ccache
+        run: |
+          ccache -M $CCACHE_MAXSIZE
+          ccache -z
+
+      - name: Download Clang toolchain
+        run: |
+          mkdir -p toolchain
+          cd toolchain
+          curl -L https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r416183b.tar.gz | tar xz
 
       - name: Configure kernel
-        working-directory: "$GITHUB_WORKSPACE/kernel"
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/build"
-          make ARCH=arm64 O="$GITHUB_WORKSPACE/build" android_defconfig
-          # 启用BTRFS支持（如果未启用）
-          scripts/config --file "$GITHUB_WORKSPACE/build/.config" \
-            --set-str CONFIG_BTRFS_FS y
-          scripts/config --file "$GITHUB_WORKSPACE/build/.config" \
-            --set-str CONFIG_BTRFS_FS_POSIX_ACL y
-          scripts/config --file "$GITHUB_WORKSPACE/build/.config" \
-            --set-str CONFIG_BTRFS_FS_SECURITY y
-          make ARCH=arm64 O="$GITHUB_WORKSPACE/build" olddefconfig
+          cd kernel_source/common
+          export PATH=$(pwd)/../../toolchain/bin:$PATH
+          make O=out ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
 
       - name: Build BTRFS module
-        working-directory: "$GITHUB_WORKSPACE/kernel"
         run: |
-          make -j$(nproc) ARCH=arm64 O="$GITHUB_WORKSPACE/build" M=fs/btrfs modules
+          cd kernel_source/common
+          export PATH=$(pwd)/../../toolchain/bin:$PATH
+          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- CC=clang M=fs/btrfs modules
 
-      - name: Collect artifacts
+      - name: Collect build artifacts
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/artifacts/modules"
-          find "$GITHUB_WORKSPACE/build/fs/btrfs" -name "*.ko" -exec cp {} "$GITHUB_WORKSPACE/artifacts/modules/" \;
-          find "$GITHUB_WORKSPACE/build" -name "Module.symvers" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \;
+          mkdir -p artifacts
+          cp kernel_source/common/out/fs/btrfs/btrfs.ko artifacts/
+          cp kernel_source/common/out/.config artifacts/config
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: btrfs-modules
-          path: "$GITHUB_WORKSPACE/artifacts/"
-          retention-days: 7    
+          name: btrfs-module
+          path: artifacts/
+          retention-days: 7
+
+      - name: Show ccache stats
+        run: ccache -s    
