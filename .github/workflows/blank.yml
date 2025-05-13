@@ -1,4 +1,4 @@
-name: Build BTRFS Module for GKI (Optimized)
+name: Build BTRFS Module for GKI
 
 on:
   workflow_dispatch:
@@ -25,32 +25,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32z1-dev libelf-dev liblz4-tool libncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+          # 安装适用于Ubuntu 24.04的32位库支持
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y libncurses6:i386
+          # 安装Ubuntu仓库中的Clang和ARM64交叉编译工具链
           sudo apt-get install -y clang lld gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          # 安装libssl-dev以确保modpost工具能正常工作
           sudo apt-get install -y libssl-dev
-
-      - name: Cache kernel build
-        uses: actions/cache@v3
-        with:
-          path: |
-            kernel_source/common/out
-            .ccache
-          key: ${{ runner.os }}-kernel-build-${{ github.event.inputs.kernel_tag || 'android12-5.10.168_r00' }}
-          restore-keys: |
-            ${{ runner.os }}-kernel-build-
 
       - name: Download Android kernel source
         run: |
           KERNEL_TAG=${{ github.event.inputs.kernel_tag || 'android12-5.10.168_r00' }}
           mkdir -p kernel_source
           cd kernel_source
-          if [ ! -d "common" ]; then
-            git clone https://android.googlesource.com/kernel/common -b $KERNEL_TAG --depth 1
-          else
-            echo "Using cached kernel source"
-          fi
+          git clone https://android.googlesource.com/kernel/common -b $KERNEL_TAG --depth 1
 
       - name: Set up environment variables
         run: |
@@ -58,39 +47,66 @@ jobs:
           echo "SUBARCH=arm64" >> $GITHUB_ENV
           echo "CCACHE_DIR=$(pwd)/.ccache" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=50G" >> $GITHUB_ENV
+          # 使用Ubuntu仓库中的Clang
           echo "CLANG_PATH=$(which clang)" >> $GITHUB_ENV
+          # 设置交叉编译工具链路径
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
       - name: Configure ccache
         run: |
           ccache -M $CCACHE_MAXSIZE
           ccache -z
-          ccache -s
 
       - name: Configure kernel
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE gki_defconfig
+          # 生成必要的头文件和脚本
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang prepare
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang scripts
+          
+          # 确保BTRFS模块在配置中是启用的
           echo "CONFIG_BTRFS_FS=m" >> out/.config
           echo "CONFIG_BTRFS_FS_POSIX_ACL=y" >> out/.config
           echo "CONFIG_BTRFS_FS_SECURITY=y" >> out/.config
-          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang prepare
-          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang scripts
+          
+          # 启用可能与符号相关的VFS配置选项
+          echo "CONFIG_VFS_CACHE_PARTIAL_WRITE=y" >> out/.config
+          echo "CONFIG_VFS_DIO=y" >> out/.config
+          echo "CONFIG_VFS_WRITEBACK=y" >> out/.config
+          echo "CONFIG_VFS_READDIR=y" >> out/.config
+          echo "CONFIG_VFS_WRITE=y" >> out/.config
+          echo "CONFIG_VFS_LOCK=y" >> out/.config
+          echo "CONFIG_VFS_FILESYSTEM=y" >> out/.config
+          echo "CONFIG_VFS_FSNOTIFY=y" >> out/.config
+          echo "CONFIG_VFS_SPLICE=y" >> out/.config
+          echo "CONFIG_VFS_DENTRY_ALIAS=y" >> out/.config
+          echo "CONFIG_VFS_CACHE_WRITEBACK=y" >> out/.config
+          
+          # 验证配置
           make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang olddefconfig
 
-      - name: Build minimal kernel for symbols
+      - name: Clean previous build
+        run: |
+          cd kernel_source/common
+          make O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang clean
+          rm -rf out
+
+      - name: Build complete kernel with modules
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
+          # 编译完整内核和所有模块，确保生成Module.symvers
           make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
             KBUILD_MODULES=1 \
-            kernel/ mm/ fs/ lib/ arch/$ARCH/kernel/
+            all
 
       - name: Verify Module.symvers exists
         run: |
           if [ ! -f "kernel_source/common/out/Module.symvers" ]; then
             echo "Module.symvers not found!"
+            echo "Listing contents of out directory:"
             ls -la kernel_source/common/out || true
             exit 1
           fi
@@ -99,8 +115,8 @@ jobs:
         run: |
           cd kernel_source/common
           export PATH=$(dirname $CLANG_PATH):$PATH
-          export CC="ccache $CLANG_PATH"
-          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=$CC \
+          # 重新编译BTRFS模块，确保使用最新的配置
+          make -j$(nproc) O=out ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CC=clang \
             M=fs/btrfs \
             modules
 
@@ -108,6 +124,7 @@ jobs:
         run: |
           if [ ! -f "kernel_source/common/out/fs/btrfs/btrfs.ko" ]; then
             echo "BTRFS module not found!"
+            echo "Listing contents of out/fs/btrfs directory:"
             ls -la kernel_source/common/out/fs/btrfs || true
             exit 1
           fi
@@ -117,7 +134,7 @@ jobs:
           mkdir -p artifacts
           cp kernel_source/common/out/fs/btrfs/btrfs.ko artifacts/
           cp kernel_source/common/out/.config artifacts/config
-          cp kernel_source/common/out/Module.symvers artifacts/
+          cp kernel_source/common/out/Module.symvers artifacts/  # 保存符号表
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
