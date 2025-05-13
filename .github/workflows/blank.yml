@@ -14,14 +14,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      # 关键修改：安装完整的交叉编译工具链
+      - name: Install Toolchains
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y git-core gnupg flex bison build-essential \
-            zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
-            libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev \
-            lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip \
-            fontconfig python3 bc cpio rsync kmod libelf-dev clang lld
+          sudo apt-get install -y \
+            build-essential \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libncurses-dev \
+            flex bison libelf-dev
+
+          # 验证工具链安装
+          aarch64-linux-gnu-gcc --version
+          which aarch64-linux-gnu-ld
 
       - name: Install Latest Repo Tool
         run: |
@@ -38,28 +44,25 @@ jobs:
             -b common-android12-5.10 --depth=1
           ~/bin/repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      # 关键修改：先查询可用tag再checkout
       - name: Find and Checkout Correct Tag
         run: |
           cd android-kernel/common
           git fetch --tags
-          echo "Available tags for Android 12 5.10.136:"
-          git tag -l "*5.10.136*" | sort -V
-          # 选择最接近的tag（这里以android12-5.10.136_r1为例）
-          git checkout android12-5.10.168_r00
+          SELECTED_TAG=$(git tag -l "*5.10.136*" | head -1)
+          if [ -z "$SELECTED_TAG" ]; then
+            git checkout common-android12-5.10
+          else
+            git checkout "$SELECTED_TAG"
+          fi
 
-      - name: Configure Kernel
-        run: |
-          cd android-kernel/common
-          make ARCH=arm64 gki_defconfig
-          ./scripts/config --module CONFIG_BTRFS_FS
-          ./scripts/config --disable MODULE_SIG
-          make ARCH=arm64 olddefconfig
-
+      # 关键修改：明确指定工具链路径
       - name: Build Btrfs Module
         run: |
           cd android-kernel/common
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) fs/btrfs/btrfs.ko
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=aarch64-linux-gnu-gcc \
+            LD=aarch64-linux-gnu-ld \
+            -j$(nproc) fs/btrfs/btrfs.ko
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
